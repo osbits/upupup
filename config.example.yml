@@ -1,0 +1,345 @@
+# monitor.yaml
+version: 1
+service:
+  name: Infra Healthchecks
+  timezone: Europe/Zurich
+  # Global defaults you can override per-check
+  defaults:
+    interval: 60s          # how often to run the check
+    timeout: 10s           # per-attempt timeout
+    retries: 2             # additional tries after the first failure
+    backoff: 2s            # wait between retries
+    log_runs: true         # emit a log entry for every check execution
+    maintenance_windows:   # don't alert during these windows (cron or RFC3339 interval)
+      - "cron: 0 2 * * SUN"            # Sundays 02:00 local
+      - "range: 2025-12-24T00:00-2025-12-26T23:59"
+
+# Reusable assertion sets for checks
+assertion_sets:
+  http-status-200:
+    - kind: status_code
+      op: equals
+      value: 200
+
+# Reusable secrets via env or vault-style refs
+secrets:
+  SMTP_PASSWORD: env:SMTP_PASSWORD
+  TWILIO_AUTH_TOKEN: env:TWILIO_AUTH_TOKEN
+  TELEGRAM_BOT_TOKEN: env:TELEGRAM_BOT_TOKEN
+  DISCORD_WEBHOOK_URL: env:DISCORD_WEBHOOK_URL
+  SLACK_WEBHOOK_URL: env:SLACK_WEBHOOK_URL
+  API_USER: env:API_USER
+  API_PASS: env:API_PASS
+
+# Notification endpoints ("notifiers"); referenced by ID in routes & checks
+notifiers:
+  - id: email-primary
+    type: email
+    config:
+      smtp_host: smtp.example.com
+      smtp_port: 587
+      username: alerts@example.com
+      password_ref: SMTP_PASSWORD
+      from: "Infra Monitor <alerts@example.com>"
+      to:
+        - devops@example.com
+        - oncall@example.com
+
+  - id: sms-oncall
+    type: sms
+    config:
+      provider: twilio
+      account_sid: ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      auth_token_ref: TWILIO_AUTH_TOKEN
+      from: "+14155550123"
+      to:
+        - "+41790001122"   # CH on-call
+
+  - id: voice-escalation
+    type: voice
+    config:
+      provider: twilio
+      account_sid: ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      auth_token_ref: TWILIO_AUTH_TOKEN
+      from: "+14155550123"
+      to:
+        - "+41790001122"
+      voice_message: "Critical service outage detected. Please acknowledge in the incident channel."
+
+  - id: webhook-pager
+    type: webhook
+    config:
+      url: "https://pager.example.com/hooks/incident"
+      method: POST
+      headers:
+        X-Auth: "Bearer abc123"
+      template: |-
+        {
+          "source": "{{ .check.name }}",
+          "status": "{{ .status }}",
+          "severity": "{{ .severity }}",
+          "summary": "{{ .summary }}",
+          "run_id": "{{ .run_id }}",
+          "first_failure_at": "{{ .first_failure_at }}",
+          "labels": {{ to_json .labels }},
+          "url": "{{ .ui.check_url }}"
+        }
+
+  - id: slack-incidents
+    type: slack
+    config:
+      webhook_url_ref: SLACK_WEBHOOK_URL
+      channel: "#incidents"
+      username: "infra-monitor"
+
+  - id: telegram-noc
+    type: telegram
+    config:
+      bot_token_ref: TELEGRAM_BOT_TOKEN
+      chat_id: "-1001234567890" # group/channel id
+
+  - id: discord-ops
+    type: discord
+    config:
+      webhook_url_ref: DISCORD_WEBHOOK_URL
+
+# Routing & escalation policies
+notification_policies:
+  # Default route for "prod" checks unless overridden
+  - id: route-prod
+    match:
+      env: prod
+    stages:
+      - after: 0m       # immediately on threshold breach
+        notifiers: [slack-incidents, email-primary]
+      - after: 10m      # if still failing
+        notifiers: [sms-oncall, webhook-pager]
+      - after: 20m      # if still failing
+        notifiers: [voice-escalation]
+    resolve_notifiers: [slack-incidents, email-primary]  # who gets "resolved" messages
+
+  # More noisy for security/SSL/WHOIS issues
+  - id: route-security
+    match:
+      category: security
+    stages:
+      - after: 0m
+        notifiers: [email-primary, slack-incidents, telegram-noc]
+
+# Checks (define what to test and how to assert)
+checks:
+
+  # ── HTTP(S) with login flow and rich assertions ──────────────────────────────
+  - id: api-health
+    name: Public API /health
+    type: http
+    target: "https://api.example.com/health"
+    schedule:
+      interval: 30s
+    request:
+      method: GET
+      headers:
+        Accept: "application/json"
+      timeout: 5s
+    assertion_sets: [http-status-200]
+    assertions:
+      - kind: jsonpath
+        path: "$.status"
+        op: equals
+        value: "ok"
+      - kind: latency_ms
+        op: less_than
+        value: 300
+      - kind: ssl_valid_days
+        op: greater_than
+        value: 21
+    thresholds:
+      # alert when 3 of last 4 runs failed
+      failure_ratio:
+        window: 4
+        fail_count: 3
+    labels:
+      env: prod
+      team: core
+      service: api
+    notifications:
+      route: route-prod
+
+  - id: api-authenticated-endpoint
+    name: API /v1/orders (requires login)
+    type: http
+    target: "https://api.example.com/v1/orders?limit=1"
+    preauth:                       # optional login step before the main request
+      flow: http-token            # simple token retrieval
+      request:
+        url: "https://api.example.com/auth/login"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body: |-
+          {
+            "username": "{{ secret `API_USER` }}",
+            "password": "{{ secret `API_PASS` }}"
+          }
+      capture:
+        from: jsonpath
+        path: "$.token"
+        as: auth_token
+    request:
+      method: GET
+      headers:
+        Authorization: "Bearer {{ var `auth_token` }}"
+        Accept: "application/json"
+      timeout: 8s
+    assertion_sets: [http-status-200]
+    assertions:
+      - kind: jsonpath
+        path: "$[0].id"
+        op: exists
+      - kind: latency_ms
+        op: less_than
+        value: 500
+    thresholds:
+      failure_ratio:
+        window: 5
+        fail_count: 2
+    labels:
+      env: prod
+      team: orders
+      service: api
+      category: authenticated
+    notifications:
+      route: route-prod
+      overrides:
+        # add Telegram on first failure for this specific check
+        initial_notifiers: [telegram-noc]
+
+  # ── TCP port open check ──────────────────────────────────────────────────────
+  - id: tcp-redis
+    name: Redis TCP 6379
+    type: tcp
+    target: "redis.internal.example.com:6379"
+    schedule:
+      interval: 20s
+      timeout: 2s
+    assertions:
+      - kind: tcp_connect
+        op: equals
+        value: true
+      - kind: latency_ms
+        op: less_than
+        value: 50
+    labels:
+      env: prod
+      team: platform
+      service: redis
+    notifications:
+      route: route-prod
+
+  # ── ICMP ping / reachability ────────────────────────────────────────────────
+  - id: ping-edge
+    name: Edge Gateway Ping
+    type: icmp
+    target: "edge-gw01.example.net"
+    schedule:
+      interval: 15s
+      timeout: 1s
+    assertions:
+      - kind: packet_loss_percent
+        op: less_than
+        value: 20
+      - kind: latency_ms_p95
+        op: less_than
+        value: 80
+    labels:
+      env: prod
+      team: netops
+    notifications:
+      route: route-prod
+
+  # ── DNS resolution ──────────────────────────────────────────────────────────
+  - id: dns-a-record
+    name: DNS A record for app.example.com
+    type: dns
+    target: "app.example.com"
+    resolver: "1.1.1.1:53"
+    record_type: A
+    assertions:
+      - kind: dns_answer
+        op: contains_any
+        value: ["203.0.113.10", "203.0.113.11"]
+      - kind: ttl_seconds
+        op: greater_than
+        value: 60
+    labels:
+      env: prod
+      team: core
+    notifications:
+      route: route-prod
+
+  # ── TLS/SSL certificate health (hostname & SNI) ─────────────────────────────
+  - id: tls-cert
+    name: TLS cert validity api.example.com:443
+    type: tls
+    target: "api.example.com:443"
+    sni: "api.example.com"
+    assertions:
+      - kind: ssl_valid_days
+        op: greater_than
+        value: 30
+      - kind: ssl_hostname_matches
+        op: equals
+        value: true
+    labels:
+      env: prod
+      team: security
+      category: security
+    notifications:
+      route: route-security
+
+  # ── Domain expiration (WHOIS) ───────────────────────────────────────────────
+  - id: whois-domain
+    name: example.com expiration
+    type: whois
+    target: "example.com"
+    assertions:
+      - kind: domain_expires_in_days
+        op: greater_than
+        value: 60
+    schedule:
+      interval: 6h
+    labels:
+      env: prod
+      team: security
+      category: security
+    notifications:
+      route: route-security
+
+  # ── Content match (HTML/text) including regex ───────────────────────────────
+  - id: web-landing
+    name: Landing page contains CTA
+    type: http
+    target: "https://www.example.com/"
+    request:
+      method: GET
+      headers:
+        Accept: "text/html,*/*"
+    assertion_sets: [http-status-200]
+    assertions:
+      - kind: body_contains
+        op: regex
+        value: "Sign\\s*Up\\s*Now"
+    labels:
+      env: prod
+      team: marketing
+    notifications:
+      route: route-prod
+
+# Optional templates/macros for reuse (renderer must support it)
+templates:
+  headers_json: &headers_json
+    Accept: "application/json"
+    Content-Type: "application/json"
+
+  auth_bearer: &auth_bearer
+    Authorization: "Bearer {{ var `auth_token` }}"

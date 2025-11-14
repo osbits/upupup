@@ -1,0 +1,25 @@
+services:
+  monitor:
+    build: .
+    image: upupup-monitor:latest
+    # restart: unless-stopped
+    environment:
+      MONITOR_CONFIG: /app/config.yml
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      API_USER: ${API_USER:-}
+      API_PASS: ${API_PASS:-}
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+    cap_add:
+      - NET_RAW
+    networks:
+      - monitor_net
+
+networks:
+  monitor_net:
+    driver: bridge
+
