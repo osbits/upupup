@@ -32,6 +32,7 @@ config.yml             # sample configuration
 All behaviour is driven by `config.yml`. Key sections:
 
 - `service`: global defaults (interval, timeout, retries, backoff, timezone, maintenance windows, `log_runs`, etc.).
+- `storage`: sqlite persistence for check history and notifications (`path`, retention knobs). The `MONITOR_DB_PATH` env var overrides `storage.path`.
 - `secrets`: names mapped to environment variables (`env:VAR_NAME`) used later in templates.
 - `notifiers`: delivery endpoints, each with a unique `id`.
 - `notification_policies`: escalation routes keyed by labels (e.g. `env: prod` or `category: security`).

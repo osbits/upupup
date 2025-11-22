@@ -5,6 +5,7 @@ services:
     # restart: unless-stopped
     environment:
       MONITOR_CONFIG: /app/config.yml
+      MONITOR_DB_PATH: /app/data/monitor.db
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -14,6 +15,8 @@ services:
       API_PASS: ${API_PASS:-}
     volumes:
       - ./config.yml:/app/config.yml:ro
+      # - monitor-data:/app/data
+      - ./data:/app/data
     cap_add:
       - NET_RAW
     networks:
@@ -23,3 +26,5 @@ networks:
   monitor_net:
     driver: bridge
 
+# volumes:
+#   monitor-data:

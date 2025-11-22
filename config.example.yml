@@ -14,6 +14,11 @@ service:
       - "cron: 0 2 * * SUN"            # Sundays 02:00 local
       - "range: 2025-12-24T00:00-2025-12-26T23:59"
 
+storage:
+  path: /app/data/monitor.db              # override with MONITOR_DB_PATH env if desired
+  check_state_retention: 30               # how many check states per check to keep
+  notification_log_retention: 100         # how many notification log entries to keep
+
 # Reusable assertion sets for checks
 assertion_sets:
   http-status-200:

@@ -65,6 +65,7 @@ type Config struct {
 	CheckAssertionSets   map[string][]Assertion `yaml:"assertion_sets"`
 	Checks               []CheckConfig          `yaml:"checks"`
 	Templates            map[string]interface{} `yaml:"templates"`
+	Storage              StorageConfig          `yaml:"storage"`
 }
 
 // ServiceConfig contains global settings.
@@ -82,6 +83,13 @@ type ServiceDefault struct {
 	Backoff            Duration          `yaml:"backoff"`
 	MaintenanceWindows []MaintenanceSpec `yaml:"maintenance_windows"`
 	LogRuns            bool              `yaml:"log_runs"`
+}
+
+// StorageConfig describes persistence options.
+type StorageConfig struct {
+	Path                     string `yaml:"path"`
+	CheckStateRetention      int    `yaml:"check_state_retention"`
+	NotificationLogRetention int    `yaml:"notification_log_retention"`
 }
 
 // MaintenanceSpec includes cron or range expressions.

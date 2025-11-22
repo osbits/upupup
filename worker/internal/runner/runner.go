@@ -12,6 +12,7 @@ import (
 	"github.com/osbits/upupup/worker/internal/config"
 	"github.com/osbits/upupup/worker/internal/notifier"
 	"github.com/osbits/upupup/worker/internal/render"
+	"github.com/osbits/upupup/worker/internal/storage"
 	"github.com/robfig/cron/v3"
 )
 
@@ -25,6 +26,7 @@ type Runner struct {
 	policies  map[string]config.NotificationPolicy
 	logger    *slog.Logger
 	location  *time.Location
+	store     *storage.Store
 
 	stateMu sync.Mutex
 	state   map[string]*checkState
@@ -33,7 +35,7 @@ type Runner struct {
 }
 
 // New constructs a new runner.
-func New(cfg *config.Config, secrets map[string]string, reg *notifier.Registry, renderer *render.Engine, logger *slog.Logger, location *time.Location) (*Runner, error) {
+func New(cfg *config.Config, secrets map[string]string, reg *notifier.Registry, renderer *render.Engine, logger *slog.Logger, location *time.Location, store *storage.Store) (*Runner, error) {
 	if err := applyAssertionSets(cfg); err != nil {
 		return nil, err
 	}
@@ -57,6 +59,7 @@ func New(cfg *config.Config, secrets map[string]string, reg *notifier.Registry, 
 		policies:    policies,
 		logger:      logger,
 		location:    location,
+		store:       store,
 		state:       map[string]*checkState{},
 		maintenance: maintenance,
 	}, nil
@@ -136,6 +139,7 @@ func (r *Runner) executeCheck(ctx context.Context, check config.CheckConfig) {
 	}
 
 	r.logRun(check, result)
+	r.persistCheckState(check, result)
 	r.handleResult(check, result)
 }
 
@@ -219,6 +223,7 @@ func (r *Runner) dispatch(ids []string, event notifier.Event) {
 			r.logger.Error("notifier not found", "notifier_id", id)
 			continue
 		}
+		r.recordNotification(id, event)
 		go func(n notifier.Notifier) {
 			if err := n.Notify(context.Background(), event); err != nil {
 				r.logger.Error("notifier error", "notifier_id", n.ID(), "error", err)
@@ -491,6 +496,69 @@ func (r *Runner) logRun(check config.CheckConfig, result checks.Result) {
 		attrs = append(attrs, "failed_assertions", failures)
 	}
 	r.logger.Info("check run", attrs...)
+}
+
+func (r *Runner) persistCheckState(check config.CheckConfig, result checks.Result) {
+	if r.store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	latency := result.Latency
+	if latency == 0 && !result.CompletedAt.IsZero() && !result.StartedAt.IsZero() {
+		latency = result.CompletedAt.Sub(result.StartedAt)
+	}
+	occurredAt := result.CompletedAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	errText := ""
+	if result.Error != nil {
+		errText = result.Error.Error()
+	}
+
+	run := storage.CheckRun{
+		CheckID:    check.ID,
+		CheckName:  check.Name,
+		Success:    result.Success,
+		Summary:    summarizeResult(result),
+		Error:      errText,
+		Latency:    latency,
+		OccurredAt: occurredAt,
+	}
+	if err := r.store.RecordCheckRun(ctx, run); err != nil {
+		r.logger.Error("failed to record check state", "check_id", check.ID, "error", err)
+	}
+}
+
+func (r *Runner) recordNotification(notifierID string, event notifier.Event) {
+	if r.store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	occurredAt := event.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+
+	logEntry := storage.NotificationLog{
+		NotifierID: notifierID,
+		CheckID:    event.Check.ID,
+		CheckName:  event.Check.Name,
+		RunID:      event.RunID,
+		Status:     event.Status,
+		Severity:   event.Severity,
+		Summary:    event.Summary,
+		Labels:     event.Labels,
+		OccurredAt: occurredAt,
+	}
+
+	if err := r.store.RecordNotification(ctx, logEntry); err != nil {
+		r.logger.Error("failed to record notification", "notifier_id", notifierID, "check_id", event.Check.ID, "error", err)
+	}
 }
 
 func applyAssertionSets(cfg *config.Config) error {
