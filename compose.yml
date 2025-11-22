@@ -22,9 +22,39 @@ services:
     networks:
       - monitor_net
 
+  server:
+    build: server/
+    image: upupup-server:latest
+    depends_on:
+      - monitor
+    environment:
+      MONITOR_DB_PATH: /app/data/monitor.db
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    networks:
+      - monitor_net
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    depends_on:
+      - server
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitor_net
+
 networks:
   monitor_net:
     driver: bridge
 
-# volumes:
-#   monitor-data:
+volumes:
+  prometheus-data:
