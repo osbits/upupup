@@ -17,8 +17,8 @@ import (
 	"github.com/go-ping/ping"
 	dnsclient "github.com/miekg/dns"
 	"github.com/oliveagle/jsonpath"
-	"github.com/osbits/upupup/internal/config"
-	"github.com/osbits/upupup/internal/render"
+	"github.com/osbits/upupup/worker/internal/config"
+	"github.com/osbits/upupup/worker/internal/render"
 	"golang.org/x/net/publicsuffix"
 )
 

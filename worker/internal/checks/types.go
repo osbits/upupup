@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/osbits/upupup/internal/config"
+	"github.com/osbits/upupup/worker/internal/config"
 )
 
 // Result captures the outcome of a single check execution.

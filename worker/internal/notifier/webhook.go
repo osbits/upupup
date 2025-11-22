@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/osbits/upupup/internal/render"
+	"github.com/osbits/upupup/worker/internal/render"
 )
 
 // WebhookConfig represents a generic webhook notifier.

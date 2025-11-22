@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/osbits/upupup/internal/config"
+	"github.com/osbits/upupup/worker/internal/config"
 )
 
 // Registry stores notifiers by ID.

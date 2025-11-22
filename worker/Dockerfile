@@ -16,9 +16,5 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /out/monitor /usr/local/bin/monitor
-COPY config.yml /app/config.yml
-
-ENV MONITOR_CONFIG=/app/config.yml
 
 ENTRYPOINT ["/usr/local/bin/monitor","-config","/app/config.yml"]
-

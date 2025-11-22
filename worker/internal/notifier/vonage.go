@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/osbits/upupup/internal/render"
+	"github.com/osbits/upupup/worker/internal/render"
 )
 
 // VonageSMSConfig configures Vonage SMS delivery.

@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/osbits/upupup/internal/config"
-	"github.com/osbits/upupup/internal/notifier"
-	"github.com/osbits/upupup/internal/render"
-	"github.com/osbits/upupup/internal/runner"
+	"github.com/osbits/upupup/worker/internal/config"
+	"github.com/osbits/upupup/worker/internal/notifier"
+	"github.com/osbits/upupup/worker/internal/render"
+	"github.com/osbits/upupup/worker/internal/runner"
 )
 
 func main() {

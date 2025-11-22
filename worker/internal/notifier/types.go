@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/osbits/upupup/internal/checks"
-	"github.com/osbits/upupup/internal/config"
-	"github.com/osbits/upupup/internal/render"
+	"github.com/osbits/upupup/worker/internal/checks"
+	"github.com/osbits/upupup/worker/internal/config"
+	"github.com/osbits/upupup/worker/internal/render"
 )
 
 // Event represents a notification event.

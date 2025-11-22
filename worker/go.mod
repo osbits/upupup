@@ -1,4 +1,4 @@
-module github.com/osbits/upupup
+module github.com/osbits/upupup/worker
 
 go 1.24.0
 

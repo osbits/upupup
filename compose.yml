@@ -1,6 +1,6 @@
 services:
   monitor:
-    build: .
+    build: worker/
     image: upupup-monitor:latest
     # restart: unless-stopped
     environment:
