@@ -32,18 +32,27 @@ services:
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./data:/app/data
+      - ./prometheus:/app/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
-      - "8080:8080"
+      - "8083:8083"
     networks:
       - monitor_net
 
   prometheus:
     image: prom/prometheus:v2.54.0
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--web.enable-lifecycle"
+      - "--web.listen-address=0.0.0.0:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -54,6 +63,7 @@ services:
 
 networks:
   monitor_net:
+    name: upupup_net
     driver: bridge
 
 volumes:

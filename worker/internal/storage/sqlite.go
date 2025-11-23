@@ -147,6 +147,7 @@ func (s *Store) initSchema() error {
 			occurred_at TIMESTAMP NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_logs_occurred ON notification_logs (occurred_at DESC);`,
+		nodeMetricsTableDDL,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {

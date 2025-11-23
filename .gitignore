@@ -2,3 +2,4 @@
 .env
 data/
 config.yml
+prometheus/prometheus.yml

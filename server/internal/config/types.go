@@ -199,6 +199,7 @@ type CheckConfig struct {
 	PreAuth       *PreAuthConfig    `yaml:"preauth"`
 	Assertions    []Assertion       `yaml:"assertions"`
 	Thresholds    Thresholds        `yaml:"thresholds"`
+	Metrics       *MetricsCheck     `yaml:"metrics"`
 	Labels        map[string]string `yaml:"labels"`
 	Notifications CheckNotification `yaml:"notifications"`
 	Resolver      string            `yaml:"resolver"`
@@ -257,6 +258,37 @@ type FailureRatioThreshold struct {
 	FailCount int `yaml:"fail_count"`
 }
 
+// MetricsCheck configures a metrics-based check.
+type MetricsCheck struct {
+	NodeID     string                    `yaml:"node_id"`
+	MaxAge     *NullableDuration         `yaml:"max_age"`
+	Thresholds []MetricThreshold         `yaml:"thresholds"`
+	Computed   map[string]ComputedMetric `yaml:"computed"`
+}
+
+// MetricThreshold defines an individual metric expectation.
+type MetricThreshold struct {
+	Name   string            `yaml:"name"`
+	Op     string            `yaml:"op"`
+	Value  float64           `yaml:"value"`
+	Labels map[string]string `yaml:"labels"`
+}
+
+// ComputedMetric defines a derived metric calculated from other metrics.
+type ComputedMetric struct {
+	Expression  string                     `yaml:"expression"`
+	Variables   map[string]MetricReference `yaml:"variables"`
+	Labels      map[string]string          `yaml:"labels"`
+	Description string                     `yaml:"description"`
+}
+
+// MetricReference identifies a metric to pull into a computed expression.
+type MetricReference struct {
+	Name    string            `yaml:"name"`
+	Labels  map[string]string `yaml:"labels"`
+	Default *float64          `yaml:"default"`
+}
+
 // CheckNotification describes check-specific notification config.
 type CheckNotification struct {
 	Route     string                `yaml:"route"`
@@ -290,9 +322,16 @@ type HealthConfig struct {
 	FailWhenNoChecksConfigured bool     `yaml:"fail_when_no_checks_configured"`
 }
 
-// MetricsConfig configures prometheus exposition.
+// MetricsConfig configures prometheus exposition and scrape generation.
 type MetricsConfig struct {
-	Namespace string `yaml:"namespace"`
+	Namespace                string   `yaml:"namespace"`
+	ConfigPath               string   `yaml:"config_path"`
+	JobName                  string   `yaml:"job_name"`
+	Scheme                   string   `yaml:"scheme"`
+	Targets                  []string `yaml:"targets"`
+	GlobalScrapeInterval     Duration `yaml:"global_scrape_interval"`
+	GlobalEvaluationInterval Duration `yaml:"global_evaluation_interval"`
+	ScrapeInterval           Duration `yaml:"scrape_interval"`
 }
 
 // HookConfig describes a runtime hook.

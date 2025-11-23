@@ -62,8 +62,17 @@ const (
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	now := time.Now().UTC()
+	resp := a.healthSnapshot(ctx, time.Now().UTC())
+	statusCode := http.StatusOK
+	if resp.Status != statusOK {
+		statusCode = http.StatusServiceUnavailable
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(resp)
+}
 
+func (a *App) healthSnapshot(ctx context.Context, now time.Time) healthResponse {
 	dbComponent := componentStatus{Status: statusOK}
 	if err := a.store.Ping(ctx); err != nil {
 		dbComponent.Status = statusCritical
@@ -76,7 +85,7 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	overall := deriveOverallStatus(dbComponent.Status, notificationStatus.Status, checkStatuses)
 
-	resp := healthResponse{
+	return healthResponse{
 		Status:        overall,
 		GeneratedAt:   now,
 		Database:      dbComponent,
@@ -84,14 +93,6 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Notifications: notificationStatus,
 		ActiveHooks:   activeHooks,
 	}
-
-	statusCode := http.StatusOK
-	if overall != statusOK {
-		statusCode = http.StatusServiceUnavailable
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (a *App) evaluateChecks(ctx context.Context, now time.Time) []checkComponent {

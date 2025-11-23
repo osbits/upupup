@@ -26,10 +26,13 @@ go run ./cmd/upupup-server --config ../config.yml
 The server reads the shared `config.yml`, opens the `storage.path` SQLite database and exposes:
 
 - `GET /healthcheck` – verifies database connectivity, recent check execution activity and notification log health.
+- `GET /readiness` – reports readiness once the server is healthy and the Prometheus scrape configuration has been generated.
 - `POST /api/hook/{id}` – triggers pre-defined hooks (for example temporary pause of notifications) with optional runtime parameters.
-- `GET /api/data/{id}` – renders Prometheus-compatible metrics for a specific check using stored check state.
+- `GET /api/metrics/{id}` – renders Prometheus-compatible metrics for a specific check using stored check state.
 
 All endpoints enforce configurable IP allowlists defined under the `server:` section in `config.yml`.
+
+> Docker Compose uses the `/readiness` endpoint as a container healthcheck so the bundled Prometheus service only starts once the server reports ready.
 
 ## Repository Layout
 

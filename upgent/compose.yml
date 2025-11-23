@@ -1,0 +1,40 @@
+services:
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($$|/)"
+    pid: host
+    privileged: false
+    volumes:
+      - /:/host:ro,rslave
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/hostname:/host/etc/hostname:ro
+    networks:
+      - upgent_net
+
+  upgent:
+    build: .
+    depends_on:
+      - node-exporter
+    environment:
+      UPGENT_NODE_ID: ${UPGENT_NODE_ID:?set the node identifier}
+      UPGENT_SERVER_URL: ${UPGENT_SERVER_URL:?set the upupup server base URL}
+      UPGENT_SCRAPE_URL: ${UPGENT_SCRAPE_URL:-http://node-exporter:9100/metrics}
+      UPGENT_INTERVAL: ${UPGENT_INTERVAL:-15s}
+      UPGENT_TIMEOUT: ${UPGENT_TIMEOUT:-10s}
+      UPGENT_ENABLE_GZIP: ${UPGENT_ENABLE_GZIP:-true}
+      UPGENT_LOG_LEVEL: ${UPGENT_LOG_LEVEL:-info}
+    networks:
+      - upgent_net
+
+networks:
+  upgent_net:
+    external: true
+    name: upupup_net
+    # driver: bridge
+

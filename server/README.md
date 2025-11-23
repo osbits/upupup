@@ -5,10 +5,13 @@ The server module provides an HTTP API that sits alongside the monitoring worker
 ## Features
 
 - **Health endpoint** – validates database connectivity, recent check execution activity and notification log health (`GET /healthcheck`).
+- **Readiness endpoint** – reports readiness only after health checks pass and the Prometheus scrape configuration is generated (`GET /readiness`).
 - **Hook endpoint** – triggers pre-defined operational hooks (e.g. pause notifications for a check) with optional runtime metadata (`POST /api/hook/{id}`).
-- **Prometheus proxy** – renders the most recent check state as metrics consumable by Prometheus scrapers (`GET /api/data/{checkID}`).
+- **Prometheus proxy** – renders the most recent check state as metrics consumable by Prometheus scrapers (`GET /api/metrics/{checkID}`).
 - **Metrics ingestion** – accepts node exporter style snapshots from agents and persists them for later consumption (`POST /api/ingest/{id}`).
 - **IP allowlists** – global and per-hook CIDR/IP rules restrict who may access the API.
+
+> When deployed via the provided Docker Compose file, the server container exposes a healthcheck backed by `/readiness`; the Prometheus container only launches once this healthcheck succeeds.
 
 ## Configuration
 
@@ -28,6 +31,13 @@ server:
     required_recent_runs: 1
   prometheus:
     namespace: upupup
+    config_path: /app/prometheus/prometheus.yml
+    job_name: upupup_checks
+    scheme: http
+    targets:
+      - server:8080
+    global_scrape_interval: 30s
+    global_evaluation_interval: 30s
 
 hooks:
   - id: pause-ms-portal

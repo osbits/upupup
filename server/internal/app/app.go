@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,19 +20,24 @@ import (
 
 // App wires configuration, storage and HTTP handlers together.
 type App struct {
-	cfg             *config.Config
-	store           *storage.Store
-	hookManager     *hooks.Manager
-	allowlist       *access.Allowlist
-	hookAllowlist   map[string]*access.Allowlist
-	hookConfigs     map[string]config.HookConfig
-	checkConfigs    map[string]config.CheckConfig
-	trustedProxies  []*net.IPNet
-	logger          *slog.Logger
-	serviceDefaults config.ServiceDefault
-	healthCfg       config.HealthConfig
-	metricsCfg      config.MetricsConfig
-	location        *time.Location
+	cfg               *config.Config
+	store             *storage.Store
+	hookManager       *hooks.Manager
+	allowlist         *access.Allowlist
+	hookAllowlist     map[string]*access.Allowlist
+	hookConfigs       map[string]config.HookConfig
+	checkConfigs      map[string]config.CheckConfig
+	trustedProxies    []*net.IPNet
+	logger            *slog.Logger
+	serviceDefaults   config.ServiceDefault
+	healthCfg         config.HealthConfig
+	metricsCfg        config.MetricsConfig
+	location          *time.Location
+	promConfigMu      sync.RWMutex
+	promConfigPath    string
+	promConfigAt      time.Time
+	promConfigErr     error
+	promConfigTargets []string
 }
 
 // New constructs an App instance ready to serve requests.
@@ -105,6 +111,7 @@ func New(ctx context.Context, cfg *config.Config, store *storage.Store, logger *
 		metricsCfg:      applyMetricsDefaults(cfg.Server.Prometheus),
 		location:        location,
 	}
+	app.initialisePrometheusConfig()
 	return app, nil
 }
 
@@ -117,12 +124,13 @@ func (a *App) Routes() http.Handler {
 		r.Use(middleware.Logger)
 	}
 	r.Use(a.ipAllowMiddleware)
+	r.Get("/readiness", a.handleReadiness)
 	r.Get("/healthcheck", a.handleHealth)
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/hook", func(r chi.Router) {
 			r.Post("/{hookID}", a.handleHook)
 		})
-		r.Route("/data", func(r chi.Router) {
+		r.Route("/metrics", func(r chi.Router) {
 			r.Get("/{checkID}", a.handleMetrics)
 		})
 		r.Route("/ingest", func(r chi.Router) {
@@ -151,6 +159,18 @@ func applyHealthDefaults(cfg config.HealthConfig) config.HealthConfig {
 func applyMetricsDefaults(cfg config.MetricsConfig) config.MetricsConfig {
 	if cfg.Namespace == "" {
 		cfg.Namespace = "upupup"
+	}
+	if cfg.JobName == "" {
+		cfg.JobName = "upupup_checks"
+	}
+	if cfg.Scheme == "" {
+		cfg.Scheme = "http"
+	}
+	if cfg.GlobalScrapeInterval.Duration <= 0 {
+		cfg.GlobalScrapeInterval = config.Duration{Duration: 30 * time.Second}
+	}
+	if cfg.GlobalEvaluationInterval.Duration <= 0 {
+		cfg.GlobalEvaluationInterval = config.Duration{Duration: 30 * time.Second}
 	}
 	return cfg
 }

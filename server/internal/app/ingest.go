@@ -45,11 +45,11 @@ func (a *App) handleIngestMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	metrics := strings.TrimSpace(string(payload))
-	if metrics == "" {
+	if len(bytes.TrimSpace(payload)) == 0 {
 		http.Error(w, "payload is empty", http.StatusBadRequest)
 		return
 	}
+	metrics := string(payload)
 
 	ingestedAt := time.Now().UTC()
 	snapshot := storage.NodeMetricSnapshot{

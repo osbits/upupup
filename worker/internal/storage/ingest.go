@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS node_metrics (
 );
 `
 
-// NodeMetricSnapshot represents the latest raw metrics payload ingested for a node.
+// NodeMetricSnapshot represents the latest metrics payload for a node.
 type NodeMetricSnapshot struct {
 	NodeID     string
 	Payload    string
@@ -26,18 +26,18 @@ type NodeMetricSnapshot struct {
 	IngestedAt time.Time
 }
 
-// EnsureIngestSchema makes sure the ingestion tables exist.
-func (s *Store) EnsureIngestSchema(ctx context.Context) error {
+// EnsureNodeMetricsSchema guarantees that the metrics table exists.
+func (s *Store) EnsureNodeMetricsSchema(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("store not initialised")
 	}
 	if _, err := s.db.ExecContext(ctx, nodeMetricsTableDDL); err != nil {
-		return fmt.Errorf("ensure ingest schema: %w", err)
+		return fmt.Errorf("ensure node metrics schema: %w", err)
 	}
 	return nil
 }
 
-// UpsertNodeMetrics persists the latest metrics payload for a node.
+// UpsertNodeMetrics stores or updates the latest metrics payload for a node.
 func (s *Store) UpsertNodeMetrics(ctx context.Context, snapshot NodeMetricSnapshot) error {
 	if s == nil || s.db == nil {
 		return errors.New("store not initialised")
@@ -73,7 +73,7 @@ func (s *Store) UpsertNodeMetrics(ctx context.Context, snapshot NodeMetricSnapsh
 	return nil
 }
 
-// LatestNodeMetrics loads the most recently stored snapshot for a node.
+// LatestNodeMetrics returns the most recent metrics snapshot for the node.
 func (s *Store) LatestNodeMetrics(ctx context.Context, nodeID string) (*NodeMetricSnapshot, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("store not initialised")

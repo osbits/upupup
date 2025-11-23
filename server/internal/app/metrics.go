@@ -96,6 +96,34 @@ func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(builder, "# TYPE %s_check_recent_failures gauge\n", namespace)
 	fmt.Fprintf(builder, "%s_check_recent_failures{%s} %d\n", namespace, labels, failed)
 
+	if check.Metrics != nil {
+		nodeID := strings.TrimSpace(check.Metrics.NodeID)
+		if nodeID == "" {
+			nodeID = strings.TrimSpace(check.Target)
+		}
+		if nodeID != "" {
+			snapshot, err := a.store.LatestNodeMetrics(ctx, nodeID)
+			if err != nil {
+				http.Error(w, "failed to load node metrics: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if snapshot != nil && snapshot.Payload != "" {
+				decoratedPayload := ensureCheckIDLabel(snapshot.Payload, nodeID)
+				builder.WriteString("\n")
+				ingestedAt := snapshot.IngestedAt.UTC()
+				timestamp := "unknown"
+				if !ingestedAt.IsZero() {
+					timestamp = ingestedAt.Format(time.RFC3339)
+				}
+				fmt.Fprintf(builder, "# Raw metrics from node %s (ingested_at=%s)\n", promLabelValue(nodeID), timestamp)
+				builder.WriteString(decoratedPayload)
+				if !strings.HasSuffix(decoratedPayload, "\n") {
+					builder.WriteString("\n")
+				}
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = w.Write([]byte(builder.String()))
 }
@@ -129,4 +157,55 @@ func boolToFloat(ok bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+func ensureCheckIDLabel(payload string, checkID string) string {
+	checkID = strings.TrimSpace(checkID)
+	if payload == "" || checkID == "" {
+		return payload
+	}
+	checkLabel := fmt.Sprintf(`check_id="%s"`, promLabelValue(checkID))
+	lines := strings.Split(payload, "\n")
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		rest := strings.TrimLeft(line, " \t")
+
+		whitespacePos := strings.IndexAny(rest, " \t")
+		if whitespacePos == -1 {
+			continue
+		}
+
+		metricPart := rest[:whitespacePos]
+		valuePart := rest[whitespacePos:]
+
+		if strings.Contains(metricPart, "check_id=") {
+			lines[idx] = line
+			continue
+		}
+
+		if bracePos := strings.Index(metricPart, "{"); bracePos != -1 {
+			closePos := strings.LastIndex(metricPart, "}")
+			if closePos == -1 || closePos < bracePos {
+				lines[idx] = line
+				continue
+			}
+			prefix := metricPart[:closePos]
+			suffix := metricPart[closePos:]
+			if strings.HasSuffix(prefix, "{") {
+				metricPart = prefix + checkLabel + suffix
+			} else {
+				metricPart = prefix + "," + checkLabel + suffix
+			}
+		} else {
+			metricPart = metricPart + "{" + checkLabel + "}"
+		}
+
+		lines[idx] = leading + metricPart + valuePart
+	}
+	return strings.Join(lines, "\n")
 }

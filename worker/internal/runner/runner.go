@@ -115,6 +115,7 @@ func (r *Runner) executeCheck(ctx context.Context, check config.CheckConfig) {
 		Secrets:        r.secrets,
 		TemplateEngine: r.renderer,
 		TimeLocation:   r.location,
+		Store:          r.store,
 	}
 
 	var result checks.Result

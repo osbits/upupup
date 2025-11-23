@@ -197,6 +197,7 @@ type CheckConfig struct {
 	PreAuth       *PreAuthConfig    `yaml:"preauth"`
 	Assertions    []Assertion       `yaml:"assertions"`
 	Thresholds    Thresholds        `yaml:"thresholds"`
+	Metrics       *MetricsCheck     `yaml:"metrics"`
 	Labels        map[string]string `yaml:"labels"`
 	Notifications CheckNotification `yaml:"notifications"`
 	Resolver      string            `yaml:"resolver"`
@@ -253,6 +254,37 @@ type Thresholds struct {
 type FailureRatioThreshold struct {
 	Window    int `yaml:"window"`
 	FailCount int `yaml:"fail_count"`
+}
+
+// MetricsCheck configures a metrics-based check.
+type MetricsCheck struct {
+	NodeID     string                    `yaml:"node_id"`
+	MaxAge     *NullableDuration         `yaml:"max_age"`
+	Thresholds []MetricThreshold         `yaml:"thresholds"`
+	Computed   map[string]ComputedMetric `yaml:"computed"`
+}
+
+// MetricThreshold defines an individual metric expectation.
+type MetricThreshold struct {
+	Name   string            `yaml:"name"`
+	Op     string            `yaml:"op"`
+	Value  float64           `yaml:"value"`
+	Labels map[string]string `yaml:"labels"`
+}
+
+// ComputedMetric defines a derived metric calculated from other metrics.
+type ComputedMetric struct {
+	Expression  string                     `yaml:"expression"`
+	Variables   map[string]MetricReference `yaml:"variables"`
+	Labels      map[string]string          `yaml:"labels"`
+	Description string                     `yaml:"description"`
+}
+
+// MetricReference identifies a metric to pull into a computed expression.
+type MetricReference struct {
+	Name    string            `yaml:"name"`
+	Labels  map[string]string `yaml:"labels"`
+	Default *float64          `yaml:"default"`
 }
 
 // CheckNotification describes check-specific notification config.
