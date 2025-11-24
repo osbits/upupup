@@ -14,6 +14,7 @@ import (
 	"github.com/osbits/upupup/worker/internal/notifier"
 	"github.com/osbits/upupup/worker/internal/render"
 	"github.com/osbits/upupup/worker/internal/runner"
+	"github.com/osbits/upupup/worker/internal/storage"
 )
 
 func main() {
@@ -57,7 +58,30 @@ func main() {
 		location = time.UTC
 	}
 
-	run, err := runner.New(cfg, secrets, registry, engine, logger, location)
+	dbPath := cfg.Storage.Path
+	if envPath := os.Getenv("MONITOR_DB_PATH"); envPath != "" {
+		dbPath = envPath
+	}
+	if dbPath == "" {
+		logger.Error("storage path is not configured", "hint", "set storage.path in config or MONITOR_DB_PATH env var")
+		os.Exit(1)
+	}
+
+	store, err := storage.Open(dbPath, storage.Options{
+		CheckStateRetention:   cfg.Storage.CheckStateRetention,
+		NotificationRetention: cfg.Storage.NotificationLogRetention,
+	})
+	if err != nil {
+		logger.Error("failed to open storage", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			logger.Warn("failed to close storage", "error", err)
+		}
+	}()
+
+	run, err := runner.New(cfg, secrets, registry, engine, logger, location, store)
 	if err != nil {
 		logger.Error("failed to initialize runner", "error", err)
 		os.Exit(1)

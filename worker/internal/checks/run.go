@@ -19,6 +19,7 @@ import (
 	"github.com/oliveagle/jsonpath"
 	"github.com/osbits/upupup/worker/internal/config"
 	"github.com/osbits/upupup/worker/internal/render"
+	"github.com/osbits/upupup/worker/internal/storage"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -29,6 +30,7 @@ type Environment struct {
 	TemplateEngine *render.Engine
 	HttpClient     *http.Client
 	TimeLocation   *time.Location
+	Store          *storage.Store
 }
 
 // Execute runs a check once.
@@ -55,6 +57,8 @@ func Execute(ctx context.Context, cfg config.CheckConfig, env Environment) Resul
 		return runTLS(ctx, start, cfg, env)
 	case "whois":
 		return runWHOIS(ctx, start, cfg, env)
+	case "metrics":
+		return runMetrics(ctx, start, cfg, env)
 	default:
 		return Result{
 			CheckID:     cfg.ID,

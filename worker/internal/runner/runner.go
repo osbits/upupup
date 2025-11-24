@@ -12,6 +12,7 @@ import (
 	"github.com/osbits/upupup/worker/internal/config"
 	"github.com/osbits/upupup/worker/internal/notifier"
 	"github.com/osbits/upupup/worker/internal/render"
+	"github.com/osbits/upupup/worker/internal/storage"
 	"github.com/robfig/cron/v3"
 )
 
@@ -25,15 +26,20 @@ type Runner struct {
 	policies  map[string]config.NotificationPolicy
 	logger    *slog.Logger
 	location  *time.Location
+	store     *storage.Store
 
 	stateMu sync.Mutex
 	state   map[string]*checkState
+
+	hookCacheMu     sync.Mutex
+	hookCache       []storage.HookExecution
+	hookCacheExpiry time.Time
 
 	maintenance []maintenanceWindow
 }
 
 // New constructs a new runner.
-func New(cfg *config.Config, secrets map[string]string, reg *notifier.Registry, renderer *render.Engine, logger *slog.Logger, location *time.Location) (*Runner, error) {
+func New(cfg *config.Config, secrets map[string]string, reg *notifier.Registry, renderer *render.Engine, logger *slog.Logger, location *time.Location, store *storage.Store) (*Runner, error) {
 	if err := applyAssertionSets(cfg); err != nil {
 		return nil, err
 	}
@@ -57,6 +63,7 @@ func New(cfg *config.Config, secrets map[string]string, reg *notifier.Registry, 
 		policies:    policies,
 		logger:      logger,
 		location:    location,
+		store:       store,
 		state:       map[string]*checkState{},
 		maintenance: maintenance,
 	}, nil
@@ -112,6 +119,7 @@ func (r *Runner) executeCheck(ctx context.Context, check config.CheckConfig) {
 		Secrets:        r.secrets,
 		TemplateEngine: r.renderer,
 		TimeLocation:   r.location,
+		Store:          r.store,
 	}
 
 	var result checks.Result
@@ -136,6 +144,7 @@ func (r *Runner) executeCheck(ctx context.Context, check config.CheckConfig) {
 	}
 
 	r.logRun(check, result)
+	r.persistCheckState(check, result)
 	r.handleResult(check, result)
 }
 
@@ -156,15 +165,16 @@ func (r *Runner) handleResult(check config.CheckConfig, result checks.Result) {
 		if !prevFailing {
 			state.Failing = true
 			state.FirstFailure = time.Now()
-			state.StageNotified = map[int]bool{}
+			state.StageState = map[int]stageNotificationState{}
 			state.InitialNotified = false
 			r.logger.Error("check entered failing state", "check_id", check.ID, "summary", summarizeResult(result))
-			r.sendInitialNotifications(check, state, result)
 		}
+		r.sendInitialNotifications(check, state, result)
 		r.sendEscalations(check, state, result)
 	} else {
 		if prevFailing {
 			state.Failing = false
+			r.completePauseHooks(check)
 			r.logger.Info("check recovered", "check_id", check.ID)
 			r.sendResolveNotifications(check, state, result)
 		}
@@ -176,6 +186,10 @@ func (r *Runner) sendInitialNotifications(check config.CheckConfig, state *check
 		return
 	}
 	if state.InitialNotified {
+		return
+	}
+	if hooks := r.applicablePauseHooks(time.Now().UTC(), check); len(hooks) > 0 {
+		r.logger.Info("skipping initial notifications due to active pause hook", "check_id", check.ID, "hooks", hookIDs(hooks))
 		return
 	}
 	ids := check.Notifications.Overrides.InitialNotifiers
@@ -190,15 +204,46 @@ func (r *Runner) sendEscalations(check config.CheckConfig, state *checkState, re
 		r.logger.Error("missing notification policy", "route", check.Notifications.Route)
 		return
 	}
-	event := r.buildEvent(check, state, result, "firing")
+	if state.StageState == nil {
+		state.StageState = map[int]stageNotificationState{}
+	}
 	now := time.Now()
+	if hooks := r.applicablePauseHooks(now.UTC(), check); len(hooks) > 0 {
+		r.logger.Info("skipping escalation notifications due to active pause hook", "check_id", check.ID, "hooks", hookIDs(hooks))
+		return
+	}
+	event := r.buildEvent(check, state, result, "firing")
 	for idx, stage := range policy.Stages {
-		if state.StageNotified[idx] {
+		elapsed := now.Sub(state.FirstFailure)
+		if elapsed < stage.After.Duration {
 			continue
 		}
-		if now.Sub(state.FirstFailure) >= stage.After.Duration {
+
+		stageState := state.StageState[idx]
+		var every time.Duration
+		if stage.Every != nil {
+			every = stage.Every.Duration
+		}
+
+		switch {
+		case every > 0:
+			if stageState.LastSent.IsZero() || now.Sub(stageState.LastSent) >= every {
+				r.dispatch(stage.Notifiers, event)
+				stageState.Sent = true
+				stageState.LastSent = now
+				state.StageState[idx] = stageState
+			}
+		default:
+			if stage.Every != nil && stageState.LastSent.IsZero() {
+				r.logger.Warn("ignoring non-positive escalation frequency", "route", policy.ID, "stage_index", idx, "every", every)
+			}
+			if stageState.Sent {
+				continue
+			}
 			r.dispatch(stage.Notifiers, event)
-			state.StageNotified[idx] = true
+			stageState.Sent = true
+			stageState.LastSent = now
+			state.StageState[idx] = stageState
 		}
 	}
 }
@@ -219,6 +264,7 @@ func (r *Runner) dispatch(ids []string, event notifier.Event) {
 			r.logger.Error("notifier not found", "notifier_id", id)
 			continue
 		}
+		r.recordNotification(id, event)
 		go func(n notifier.Notifier) {
 			if err := n.Notify(context.Background(), event); err != nil {
 				r.logger.Error("notifier error", "notifier_id", n.ID(), "error", err)
@@ -299,12 +345,235 @@ func (r *Runner) getState(checkID string) *checkState {
 	st, ok := r.state[checkID]
 	if !ok {
 		st = &checkState{
-			history:       []bool{},
-			StageNotified: map[int]bool{},
+			history:    []bool{},
+			StageState: map[int]stageNotificationState{},
 		}
 		r.state[checkID] = st
 	}
 	return st
+}
+
+func (r *Runner) applicablePauseHooks(now time.Time, check config.CheckConfig) []storage.HookExecution {
+	hooks := r.activePauseHooks(now)
+	if len(hooks) == 0 {
+		return nil
+	}
+	result := make([]storage.HookExecution, 0, len(hooks))
+	for _, hook := range hooks {
+		if !strings.EqualFold(strings.TrimSpace(hook.Kind), "pause_notifications") {
+			continue
+		}
+		if hookMatchesCheck(hook, check) {
+			result = append(result, hook)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func (r *Runner) activePauseHooks(now time.Time) []storage.HookExecution {
+	hooks := r.fetchActiveHooks(now)
+	if len(hooks) == 0 {
+		return nil
+	}
+
+	var pauseHooks []storage.HookExecution
+	var resumeHooks []storage.HookExecution
+
+	for _, hook := range hooks {
+		switch strings.ToLower(strings.TrimSpace(hook.Kind)) {
+		case "pause_notifications":
+			pauseHooks = append(pauseHooks, hook)
+		case "resume_notifications":
+			resumeHooks = append(resumeHooks, hook)
+		}
+	}
+
+	if r.applyResumeHooks(resumeHooks, pauseHooks) {
+		return r.activePauseHooks(now)
+	}
+
+	return pauseHooks
+}
+
+func (r *Runner) fetchActiveHooks(now time.Time) []storage.HookExecution {
+	if r.store == nil {
+		return nil
+	}
+	r.hookCacheMu.Lock()
+	defer r.hookCacheMu.Unlock()
+
+	if !r.hookCacheExpiry.IsZero() && time.Now().Before(r.hookCacheExpiry) {
+		return append([]storage.HookExecution(nil), r.hookCache...)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	hooks, err := r.store.ActiveHookExecutions(ctx, now)
+	if err != nil {
+		r.logger.Error("failed to load active hooks", "error", err)
+		r.hookCache = nil
+		r.hookCacheExpiry = time.Now().Add(5 * time.Second)
+		return nil
+	}
+	r.hookCache = hooks
+	r.hookCacheExpiry = time.Now().Add(5 * time.Second)
+	return append([]storage.HookExecution(nil), hooks...)
+}
+
+func (r *Runner) invalidateHookCache() {
+	r.hookCacheMu.Lock()
+	r.hookCache = nil
+	r.hookCacheExpiry = time.Time{}
+	r.hookCacheMu.Unlock()
+}
+
+func (r *Runner) applyResumeHooks(resumeHooks, pauseHooks []storage.HookExecution) bool {
+	if len(resumeHooks) == 0 || r.store == nil {
+		return false
+	}
+
+	completedPause := make(map[int64]bool, len(pauseHooks))
+	var changed bool
+
+	for _, resumeHook := range resumeHooks {
+		matched := false
+		for _, pauseHook := range pauseHooks {
+			if completedPause[pauseHook.ID] {
+				continue
+			}
+			if !hooksOverlap(resumeHook, pauseHook) {
+				continue
+			}
+			matched = true
+			if err := r.completeHookNow(pauseHook.ID); err != nil {
+				r.logger.Error("failed to resume notifications", "resume_hook_id", resumeHook.HookID, "pause_hook_id", pauseHook.HookID, "error", err)
+				continue
+			}
+			completedPause[pauseHook.ID] = true
+			changed = true
+			r.logger.Info("resumed notifications via hook", "resume_hook_id", resumeHook.HookID, "pause_hook_id", pauseHook.HookID)
+		}
+		if err := r.completeHookNow(resumeHook.ID); err != nil {
+			r.logger.Error("failed to mark resume hook completed", "hook_id", resumeHook.HookID, "error", err)
+		} else {
+			changed = true
+			if !matched {
+				r.logger.Info("resume hook completed with no matching pause", "hook_id", resumeHook.HookID)
+			}
+		}
+	}
+
+	if changed {
+		r.invalidateHookCache()
+	}
+	return changed
+}
+
+func hooksOverlap(resume, pause storage.HookExecution) bool {
+	if targetMatches(resume.TargetIDs, "*") || targetMatches(pause.TargetIDs, "*") {
+		return true
+	}
+	if len(resume.TargetIDs) == 0 {
+		if strings.EqualFold(strings.TrimSpace(resume.Scope), "global") {
+			return true
+		}
+	}
+	for _, target := range resume.TargetIDs {
+		id := strings.TrimSpace(target)
+		if id == "" {
+			continue
+		}
+		if targetMatches(pause.TargetIDs, id) {
+			return true
+		}
+	}
+	resumeScope := strings.ToLower(strings.TrimSpace(resume.Scope))
+	pauseScope := strings.ToLower(strings.TrimSpace(pause.Scope))
+	return resumeScope == "global" || pauseScope == "global" || resumeScope == pauseScope
+}
+
+func (r *Runner) completeHookNow(id int64) error {
+	if r.store == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return r.store.CompleteHookExecution(ctx, id)
+}
+
+func (r *Runner) completePauseHooks(check config.CheckConfig) {
+	hooks := r.applicablePauseHooks(time.Now().UTC(), check)
+	if len(hooks) == 0 || r.store == nil {
+		return
+	}
+	var anyCompleted bool
+	for _, hook := range hooks {
+		if !hook.UntilFirstSuccess {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(hook.Scope), "check") {
+			continue
+		}
+		if err := r.store.CompleteHookExecution(context.Background(), hook.ID); err != nil {
+			r.logger.Error("failed to complete pause hook", "hook_id", hook.HookID, "error", err)
+			continue
+		}
+		anyCompleted = true
+		r.logger.Info("completed pause hook after check recovery", "hook_id", hook.HookID, "check_id", check.ID)
+	}
+	if anyCompleted {
+		r.invalidateHookCache()
+	}
+}
+
+func hookMatchesCheck(hook storage.HookExecution, check config.CheckConfig) bool {
+	scope := strings.ToLower(strings.TrimSpace(hook.Scope))
+	switch scope {
+	case "global":
+		if len(hook.TargetIDs) == 0 {
+			return true
+		}
+		return targetMatches(hook.TargetIDs, "*") || targetMatches(hook.TargetIDs, check.ID)
+	case "check":
+		return targetMatches(hook.TargetIDs, check.ID)
+	case "route":
+		return targetMatches(hook.TargetIDs, check.Notifications.Route)
+	default:
+		return targetMatches(hook.TargetIDs, check.ID)
+	}
+}
+
+func targetMatches(targets []string, candidate string) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		t := strings.TrimSpace(target)
+		if t == "" {
+			continue
+		}
+		if t == "*" {
+			return true
+		}
+		if candidate != "" && t == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func hookIDs(hooks []storage.HookExecution) []string {
+	if len(hooks) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(hooks))
+	for _, hook := range hooks {
+		ids = append(ids, hook.HookID)
+	}
+	return ids
 }
 
 func (r *Runner) inMaintenance(now time.Time) bool {
@@ -320,11 +589,16 @@ type checkState struct {
 	history         []bool
 	Failing         bool
 	FirstFailure    time.Time
-	StageNotified   map[int]bool
+	StageState      map[int]stageNotificationState
 	InitialNotified bool
 	LastResult      checks.Result
 	LastUpdated     time.Time
 	LastError       error
+}
+
+type stageNotificationState struct {
+	Sent     bool
+	LastSent time.Time
 }
 
 func (s *checkState) appendHistory(failed bool, max int) {
@@ -491,6 +765,69 @@ func (r *Runner) logRun(check config.CheckConfig, result checks.Result) {
 		attrs = append(attrs, "failed_assertions", failures)
 	}
 	r.logger.Info("check run", attrs...)
+}
+
+func (r *Runner) persistCheckState(check config.CheckConfig, result checks.Result) {
+	if r.store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	latency := result.Latency
+	if latency == 0 && !result.CompletedAt.IsZero() && !result.StartedAt.IsZero() {
+		latency = result.CompletedAt.Sub(result.StartedAt)
+	}
+	occurredAt := result.CompletedAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	errText := ""
+	if result.Error != nil {
+		errText = result.Error.Error()
+	}
+
+	run := storage.CheckRun{
+		CheckID:    check.ID,
+		CheckName:  check.Name,
+		Success:    result.Success,
+		Summary:    summarizeResult(result),
+		Error:      errText,
+		Latency:    latency,
+		OccurredAt: occurredAt,
+	}
+	if err := r.store.RecordCheckRun(ctx, run); err != nil {
+		r.logger.Error("failed to record check state", "check_id", check.ID, "error", err)
+	}
+}
+
+func (r *Runner) recordNotification(notifierID string, event notifier.Event) {
+	if r.store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	occurredAt := event.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+
+	logEntry := storage.NotificationLog{
+		NotifierID: notifierID,
+		CheckID:    event.Check.ID,
+		CheckName:  event.Check.Name,
+		RunID:      event.RunID,
+		Status:     event.Status,
+		Severity:   event.Severity,
+		Summary:    event.Summary,
+		Labels:     event.Labels,
+		OccurredAt: occurredAt,
+	}
+
+	if err := r.store.RecordNotification(ctx, logEntry); err != nil {
+		r.logger.Error("failed to record notification", "notifier_id", notifierID, "check_id", event.Check.ID, "error", err)
+	}
 }
 
 func applyAssertionSets(cfg *config.Config) error {

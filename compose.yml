@@ -5,6 +5,7 @@ services:
     # restart: unless-stopped
     environment:
       MONITOR_CONFIG: /app/config.yml
+      MONITOR_DB_PATH: /app/data/monitor.db
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -14,12 +15,56 @@ services:
       API_PASS: ${API_PASS:-}
     volumes:
       - ./config.yml:/app/config.yml:ro
+      # - monitor-data:/app/data
+      - ./data:/app/data
     cap_add:
       - NET_RAW
     networks:
       - monitor_net
 
+  server:
+    build: server/
+    image: upupup-server:latest
+    depends_on:
+      - monitor
+    environment:
+      MONITOR_DB_PATH: /app/data/monitor.db
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./data:/app/data
+      - ./prometheus:/app/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    ports:
+      - "8083:8083"
+    networks:
+      - monitor_net
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    depends_on:
+      server:
+        condition: service_healthy
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-lifecycle"
+      - "--web.listen-address=0.0.0.0:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitor_net
+
 networks:
   monitor_net:
+    name: upupup_net
     driver: bridge
 
+volumes:
+  prometheus-data:

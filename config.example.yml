@@ -14,6 +14,36 @@ service:
       - "cron: 0 2 * * SUN"            # Sundays 02:00 local
       - "range: 2025-12-24T00:00-2025-12-26T23:59"
 
+storage:
+  path: /app/data/monitor.db              # override with MONITOR_DB_PATH env if desired
+  check_state_retention: 30               # how many check states per check to keep
+  notification_log_retention: 100         # how many notification log entries to keep
+
+server:
+  listen: ":8080"
+  allowed_ips:
+    - 127.0.0.1/32
+  trusted_proxies: []
+  log_requests: false
+  health:
+    max_interval_multiplier: 3
+    required_recent_runs: 1
+    notification_error_lookback: 20
+    notification_error_statuses: [error, failed, failure]
+    allow_no_notifications: true
+    skip_checks_with_no_history: false
+    fail_on_missing_check_state: false
+    fail_when_no_checks_configured: false
+  prometheus:
+    namespace: upupup
+    config_path: ./prometheus/prometheus.yml   # where the server writes the generated scrape config
+    job_name: upupup_checks
+    scheme: http
+    targets:
+      - server:8080
+    global_scrape_interval: 30s
+    global_evaluation_interval: 30s
+
 # Reusable assertion sets for checks
 assertion_sets:
   http-status-200:
@@ -213,6 +243,43 @@ checks:
       overrides:
         # add Telegram on first failure for this specific check
         initial_notifiers: [telegram-noc]
+
+  # ── Metrics with computed thresholds ─────────────────────────────────────────
+  - id: node-metrics
+    name: Node Metrics with Disk Usage
+    type: metrics
+    metrics:
+      node_id: node-a
+      max_age: 5m
+      computed:
+        disk_usage_root:
+          expression: "((size - avail) / size) * 100"
+          variables:
+            size:
+              name: node_filesystem_size_bytes
+              labels:
+                mountpoint: "/"
+                fstype: "ext4"
+            avail:
+              name: node_filesystem_avail_bytes
+              labels:
+                mountpoint: "/"
+                fstype: "ext4"
+      thresholds:
+        - name: disk_usage_root
+          op: less_than
+          value: 80
+        - name: node_load1
+          op: less_than
+          value: 1.5
+          labels:
+            instance: node-a:9100
+    labels:
+      env: prod
+      team: platform
+      service: infra
+    notifications:
+      route: route-prod
 
   # ── TCP port open check ──────────────────────────────────────────────────────
   - id: tcp-redis

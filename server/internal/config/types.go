@@ -66,6 +66,8 @@ type Config struct {
 	Checks               []CheckConfig          `yaml:"checks"`
 	Templates            map[string]interface{} `yaml:"templates"`
 	Storage              StorageConfig          `yaml:"storage"`
+	Hooks                []HookConfig           `yaml:"hooks"`
+	Server               ServerConfig           `yaml:"server"`
 }
 
 // ServiceConfig contains global settings.
@@ -297,4 +299,59 @@ type CheckNotification struct {
 // NotificationOverride overrides the policy for a check.
 type NotificationOverride struct {
 	InitialNotifiers []string `yaml:"initial_notifiers"`
+}
+
+// ServerConfig contains HTTP server specific settings.
+type ServerConfig struct {
+	Listen         string        `yaml:"listen"`
+	AllowedIPs     []string      `yaml:"allowed_ips"`
+	TrustedProxies []string      `yaml:"trusted_proxies"`
+	Health         HealthConfig  `yaml:"health"`
+	Prometheus     MetricsConfig `yaml:"prometheus"`
+	LogRequests    bool          `yaml:"log_requests"`
+}
+
+// HealthConfig controls healthcheck behaviour.
+type HealthConfig struct {
+	MaxIntervalMultiplier      int      `yaml:"max_interval_multiplier"`
+	RequiredRecentRuns         int      `yaml:"required_recent_runs"`
+	NotificationErrorLookback  int      `yaml:"notification_error_lookback"`
+	NotificationErrorStatuses  []string `yaml:"notification_error_statuses"`
+	AllowNoNotifications       bool     `yaml:"allow_no_notifications"`
+	SkipChecksWithNoHistory    bool     `yaml:"skip_checks_with_no_history"`
+	FailOnMissingCheckState    bool     `yaml:"fail_on_missing_check_state"`
+	FailWhenNoChecksConfigured bool     `yaml:"fail_when_no_checks_configured"`
+}
+
+// MetricsConfig configures prometheus exposition and scrape generation.
+type MetricsConfig struct {
+	Namespace                string   `yaml:"namespace"`
+	ConfigPath               string   `yaml:"config_path"`
+	JobName                  string   `yaml:"job_name"`
+	Scheme                   string   `yaml:"scheme"`
+	Targets                  []string `yaml:"targets"`
+	GlobalScrapeInterval     Duration `yaml:"global_scrape_interval"`
+	GlobalEvaluationInterval Duration `yaml:"global_evaluation_interval"`
+	ScrapeInterval           Duration `yaml:"scrape_interval"`
+}
+
+// HookConfig describes a runtime hook.
+type HookConfig struct {
+	ID          string            `yaml:"id"`
+	Description string            `yaml:"description"`
+	Action      HookAction        `yaml:"action"`
+	AllowedIPs  []string          `yaml:"allowed_ips"`
+	Metadata    map[string]string `yaml:"metadata"`
+}
+
+// HookAction defines the effect of a hook.
+type HookAction struct {
+	Kind              string            `yaml:"kind"`
+	Scope             string            `yaml:"scope"`
+	TargetIDs         []string          `yaml:"target_ids"`
+	Duration          *NullableDuration `yaml:"duration"`
+	MaxDuration       *NullableDuration `yaml:"max_duration"`
+	UntilFirstSuccess bool              `yaml:"until_first_success"`
+	Parameters        map[string]string `yaml:"parameters"`
+	Labels            map[string]string `yaml:"labels"`
 }

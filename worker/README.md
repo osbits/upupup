@@ -7,6 +7,7 @@ UpUpUp is a composable infrastructure health-check and notification service impl
 ## Features
 
 - **Multi-protocol checks**: HTTP/S (with templated headers/body and optional pre-auth token flows), TCP, ICMP, DNS, TLS certificate validation, and WHOIS expiry.
+- **Metrics checks**: Validate node-exporter style metrics ingested via the server against configurable thresholds and freshness windows.
 - **Flexible assertions**: Compare HTTP status codes, JSONPath expressions, body regexes, latency, SSL validity, DNS answers, and more.
 - **Thresholds & retries**: Per-check retry/backoff, sliding window failure ratios, and maintenance windows to suppress alerts.
 - **Notification routing**: Escalation policies with timed stages; out of the box support for email (SMTP), Twilio or Vonage SMS/voice, generic webhooks, Slack, Telegram, and Discord.
@@ -32,6 +33,7 @@ config.yml             # sample configuration
 All behaviour is driven by `config.yml`. Key sections:
 
 - `service`: global defaults (interval, timeout, retries, backoff, timezone, maintenance windows, `log_runs`, etc.).
+- `storage`: sqlite persistence for check history and notifications (`path`, retention knobs). The `MONITOR_DB_PATH` env var overrides `storage.path`.
 - `secrets`: names mapped to environment variables (`env:VAR_NAME`) used later in templates.
 - `notifiers`: delivery endpoints, each with a unique `id`.
 - `notification_policies`: escalation routes keyed by labels (e.g. `env: prod` or `category: security`).
@@ -138,6 +140,54 @@ The example below reuses the `http-status-200` assertion set and adds extra asse
 - Assertions vary by check type (`latency_ms`, `tcp_connect`, `packet_loss_percent`, `ssl_valid_days`, `domain_expires_in_days`, etc.).
 
 See the provided `config.yml` for additional examples, including a WHOIS domain expiry check and TLS validation.
+
+### Example: Metrics Check
+
+Metrics checks read the latest snapshot stored by the server-side ingestion API (`POST /api/ingest/{nodeID}`) and evaluate one or more metric thresholds. Each threshold targets a Prometheus metric name and optional label selector.
+
+```yaml
+- id: node-load
+  name: Node Load Average
+  type: metrics
+  metrics:
+    node_id: node-a
+    max_age: 5m            # optional freshness guard
+    computed:
+      disk_usage_root:
+        expression: "((size - avail) / size) * 100"
+        variables:
+          size:
+            name: node_filesystem_size_bytes
+            labels:
+              mountpoint: "/"
+              fstype: "ext4"
+          avail:
+            name: node_filesystem_avail_bytes
+            labels:
+              mountpoint: "/"
+              fstype: "ext4"
+    thresholds:
+    - name: disk_usage_root
+      op: less_than
+      value: 80
+      - name: node_load1
+        op: less_than
+        value: 1.5
+        labels:
+          instance: node-a:9100
+      - name: node_cpu_seconds_total
+        op: greater_than
+        value: 10
+        labels:
+          instance: node-a:9100
+          mode: system
+  notifications:
+    route: route-prod
+```
+
+If `metrics.node_id` is omitted the worker falls back to the check `target`. Thresholds use the same comparison operators as assertions (`less_than`, `<`, `greater_than`, `>`, `equals`, etc.), and any missing metric or label match is treated as a failed assertion that can trigger notifications.
+
+The optional `metrics.computed` map lets you derive new series from existing ones before evaluating thresholds. Each computed entry defines an arithmetic expression and the metric variables it depends on; thresholds can then reference the computed metric by name (e.g. `disk_usage_root` above).
 
 ## Running Locally
 
