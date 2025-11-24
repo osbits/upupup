@@ -183,8 +183,9 @@ type NotificationPolicy struct {
 
 // PolicyStage describes a notification stage.
 type PolicyStage struct {
-	After     Duration `yaml:"after"`
-	Notifiers []string `yaml:"notifiers"`
+	After     Duration  `yaml:"after"`
+	Every     *Duration `yaml:"every"`
+	Notifiers []string  `yaml:"notifiers"`
 }
 
 // CheckConfig represents a check.

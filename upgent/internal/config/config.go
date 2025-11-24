@@ -152,3 +152,4 @@ func buildIngestURL(base, nodeID string) string {
 	base = strings.TrimRight(base, "/")
 	return fmt.Sprintf("%s/api/ingest/%s", base, url.PathEscape(nodeID))
 }
+

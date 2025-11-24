@@ -55,3 +55,4 @@ func TestClientIPFromRequestRespectsXForwardedFor(t *testing.T) {
 		t.Fatalf("expected leftmost XFF even without trust due to empty trusted list, got %s", got)
 	}
 }
+

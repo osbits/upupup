@@ -174,3 +174,4 @@ func (a *Agent) forward(ctx context.Context, payload []byte) error {
 	}
 	return nil
 }
+

@@ -19,3 +19,4 @@ COPY --from=builder /out/upgent /usr/local/bin/upgent
 
 ENTRYPOINT ["/usr/local/bin/upgent"]
 
+

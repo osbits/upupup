@@ -71,3 +71,4 @@ docker build -t upgent:latest .
 - Non-200 scrape responses or non-202 ingest responses are logged as errors and
   retried on the next interval.
 
+

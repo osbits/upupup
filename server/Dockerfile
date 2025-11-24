@@ -19,3 +19,4 @@ COPY --from=builder /out/upupup-server /usr/local/bin/upupup-server
 
 ENTRYPOINT ["/usr/local/bin/upupup-server", "--config", "/app/config.yml"]
 
+
