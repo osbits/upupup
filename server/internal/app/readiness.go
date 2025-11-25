@@ -19,7 +19,6 @@ import (
 type readinessResponse struct {
 	Status        string                   `json:"status"`
 	GeneratedAt   time.Time                `json:"generated_at"`
-	Health        healthResponse           `json:"health"`
 	Configuration readinessConfigComponent `json:"configuration"`
 }
 
@@ -33,18 +32,14 @@ type readinessConfigComponent struct {
 }
 
 func (a *App) handleReadiness(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	now := time.Now().UTC()
 
-	health := a.healthSnapshot(ctx, now)
 	configStatus := a.prometheusConfigStatus()
-	overall := combineStatuses(health.Status, configStatus.Status)
-	ready := health.Status == statusOK && configStatus.Status == statusOK
+	ready := configStatus.Status == statusOK
 
 	resp := readinessResponse{
-		Status:        overall,
+		Status:        configStatus.Status,
 		GeneratedAt:   now,
-		Health:        health,
 		Configuration: configStatus,
 	}
 
