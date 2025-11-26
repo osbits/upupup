@@ -125,7 +125,9 @@ func (a *App) Routes() http.Handler {
 	}
 	r.Use(a.ipAllowMiddleware)
 	r.Get("/readiness", a.handleReadiness)
+	r.MethodFunc(http.MethodHead, "/readiness", a.handleReadiness)
 	r.Get("/healthcheck", a.handleHealth)
+	r.MethodFunc(http.MethodHead, "/healthcheck", a.handleHealth)
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/hook", func(r chi.Router) {
 			r.Post("/{hookID}", a.handleHook)
