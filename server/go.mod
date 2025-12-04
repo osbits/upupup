@@ -6,6 +6,7 @@ toolchain go1.24.10
 
 require (
 	github.com/go-chi/chi/v5 v5.1.0
+	github.com/rollbar/rollbar-go v1.4.8
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1
 )
@@ -22,4 +23,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-

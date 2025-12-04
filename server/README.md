@@ -63,7 +63,10 @@ go run ./cmd/upupup-server --config ../config.yml
 Environment overrides:
 
 - `MONITOR_DB_PATH` – overrides `storage.path`.
+- `ROLLBAR_ACCESS_TOKEN` – optional; when set (via environment or `.env`) the server boots with Rollbar error reporting enabled. Leave unset to disable it. You may also provide `ROLLBAR_ENVIRONMENT` and `ROLLBAR_CODE_VERSION` for richer metadata.
 - `--listen` flag – overrides `server.listen`.
+
+> The server automatically loads environment variables from a local `.env` file before initialising logging and Rollbar.
 
 ## Tests
 

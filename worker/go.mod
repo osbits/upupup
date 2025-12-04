@@ -14,6 +14,7 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.55.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/rollbar/rollbar-go v1.4.8
 	golang.org/x/net v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.40.1

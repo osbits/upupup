@@ -12,6 +12,7 @@ import (
 
 	"github.com/osbits/upupup/worker/internal/config"
 	"github.com/osbits/upupup/worker/internal/notifier"
+	"github.com/osbits/upupup/worker/internal/observability"
 	"github.com/osbits/upupup/worker/internal/render"
 	"github.com/osbits/upupup/worker/internal/runner"
 	"github.com/osbits/upupup/worker/internal/storage"
@@ -27,6 +28,18 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	observability.LoadDotEnv(logger)
+
+	rollbarEnabled, rollbarCleanup := observability.SetupRollbar(logger)
+	defer func() {
+		if rollbarCleanup != nil {
+			rollbarCleanup()
+		}
+	}()
+	defer observability.CapturePanic(logger, rollbarEnabled)()
+
+	panic("test")
 
 	cfg, err := config.Load(configPath)
 	if err != nil {

@@ -6,6 +6,8 @@ services:
     environment:
       MONITOR_CONFIG: /app/config.yml
       MONITOR_DB_PATH: /app/data/monitor.db
+      ROLLBAR_ACCESS_TOKEN: ${ROLLBAR_ACCESS_TOKEN:-}
+      ROLLBAR_SERVER_HOST: -
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -29,6 +31,8 @@ services:
       - monitor
     environment:
       MONITOR_DB_PATH: /app/data/monitor.db
+      ROLLBAR_ACCESS_TOKEN: ${ROLLBAR_ACCESS_TOKEN:-}
+      ROLLBAR_SERVER_HOST: -
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./data:/app/data

@@ -244,6 +244,10 @@ API_USER=monitor
 API_PASS=monitor_password
 ```
 
+### Rollbar
+
+The worker automatically loads a local `.env` file on startup. Set `ROLLBAR_ACCESS_TOKEN` there (or export it) to enable Rollbar reporting; leave it unset to keep Rollbar disabled. Optional helpers include `ROLLBAR_ENVIRONMENT` and `ROLLBAR_CODE_VERSION` for tagging payloads.
+
 ### Running Without Docker
 
 ```sh
