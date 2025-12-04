@@ -39,8 +39,6 @@ func main() {
 	}()
 	defer observability.CapturePanic(logger, rollbarEnabled)()
 
-	panic("test")
-
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		logger.Error("failed to load config", "error", err)
